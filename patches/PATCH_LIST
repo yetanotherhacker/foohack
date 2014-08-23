@@ -1,15 +1,27 @@
-#Coloured Walls and Floor patch by L
-#http://bilious.alt.org/?296
-glyphcolor.diff
-
 #Colour Alchemy patch by Nephi
 #http://bilious.alt.org/?59
 nh343-alchemy.diff
+
+#Coloured Walls and Floor patch by L
+#http://bilious.alt.org/?296
+glyphcolor.diff
 
 #Descriptive Messages patch by L
 #http://bilious.alt.org/?309
 whack.diff
 
+#Extended Conducts patch by Andreas Dorn
+#http://bilious.alt.org/?36
+NH343-conduct2.3.diff
+
 #Grudge patch by Nephi
 #http://bilious.alt.org/?62
 nh343-grudge.diff
+
+#Named Monsters patch by Nicholas Aodhagan Webb
+#http://bilious.alt.org/?181
+qm_erinys_names.diff
+
+#Seppuku patch by Sebastian Haas
+#http://bilious.alt.org/?222
+nethack-3.4.3-seppuku.patch
