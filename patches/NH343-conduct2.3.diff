@@ -1,0 +1,1198 @@
+diff -Naur orig-dir\include\extern.h patch-dir\include\extern.h
+--- orig-dir\include\extern.h	Mon Dec 08 00:39:14 2003
++++ patch-dir\include\extern.h	Sat Dec 13 10:56:10 2003
+@@ -526,7 +526,9 @@
+ E void FDECL(lesshungry, (int));
+ E boolean NDECL(is_fainted);
+ E void NDECL(reset_faint);
++# if 0
+ E void NDECL(violated_vegetarian);
++# endif
+ #if 0
+ E void NDECL(sync_hunger);
+ #endif
+@@ -1734,6 +1736,11 @@
+ E const char *NDECL(Goodbye);
+ E char *FDECL(build_plselection_prompt, (char *, int, int, int, int, int));
+ E char *FDECL(root_plselection_prompt, (char *, int, int, int, int, int));
++E void FDECL(violated, (int));
++E boolean FDECL(successful_cdt, (int));
++E boolean FDECL(intended_cdt, (int));
++E boolean FDECL(superfluous_cdt, (int));
++E boolean FDECL(failed_cdt, (int));
+ 
+ /* ### rumors.c ### */
+ 
+diff -Naur orig-dir\include\flag.h patch-dir\include\flag.h
+--- orig-dir\include\flag.h	Mon Dec 08 00:39:14 2003
++++ patch-dir\include\flag.h	Wed Dec 10 15:27:10 2003
+@@ -146,6 +146,30 @@
+ 	int	 initalign;	/* starting alignment (index into aligns[])  */
+ 	int	 randomall;	/* randomly assign everything not specified */
+ 	int	 pantheon;	/* deity selection for priest character */
++
++	/* --- initial roleplay flags ---
++	 * These flags represent the player's conduct/roleplay
++	 * intention at character creation.
++	 *
++	 * First the player can sets some of these at character
++	 * creation. (via configuration-file, ..)
++	 * Then role_init() may set/prevent certain combinations,
++	 * e.g. Monks get the vegetarian flag, vegans should also be
++	 * vegetarians, ..
++	 * 
++	 * After that the initial flags shouldn't be modified.
++	 * In u_init() the flags can be used to put some
++	 * roleplay-intrinsics into the u structure. Only those
++	 * should be modified during gameplay.
++	 */
++	boolean  ascet;
++	boolean  atheist;
++	boolean  blindfolded;
++	boolean  illiterate;
++	boolean  pacifist;
++	boolean  nudist;
++	boolean  vegan;
++	boolean  vegetarian;
+ };
+ 
+ /*
+diff -Naur orig-dir\include\mondata.h patch-dir\include\mondata.h
+--- orig-dir\include\mondata.h	Mon Dec 08 00:39:14 2003
++++ patch-dir\include\mondata.h	Wed Dec 10 12:10:54 2003
+@@ -134,6 +134,10 @@
+ #define is_rider(ptr)		((ptr) == &mons[PM_DEATH] || \
+ 				 (ptr) == &mons[PM_FAMINE] || \
+ 				 (ptr) == &mons[PM_PESTILENCE])
++#define is_guardian(ptr)	(((ptr) == &mons[PM_VLAD_THE_IMPALER]) || \
++				((ptr) == &mons[PM_WIZARD_OF_YENDOR]) || \
++				(ptr->msound == MS_NEMESIS) || \
++				((ptr) == &mons[PM_HIGH_PRIEST] && Is_sanctum(&u.uz)))
+ #define is_placeholder(ptr)	((ptr) == &mons[PM_ORC] || \
+ 				 (ptr) == &mons[PM_GIANT] || \
+ 				 (ptr) == &mons[PM_ELF] || \
+diff -Naur orig-dir\include\patchlevel.h patch-dir\include\patchlevel.h
+--- orig-dir\include\patchlevel.h	Mon Dec 08 00:39:14 2003
++++ patch-dir\include\patchlevel.h	Wed Dec 10 12:13:00 2003
+@@ -13,7 +13,7 @@
+  * Incrementing EDITLEVEL can be used to force invalidation of old bones
+  * and save files.
+  */
+-#define EDITLEVEL	0
++#define EDITLEVEL	1
+ 
+ #define COPYRIGHT_BANNER_A \
+ "NetHack, Copyright 1985-2003"
+diff -Naur orig-dir\include\you.h patch-dir\include\you.h
+--- orig-dir\include\you.h	Mon Dec 08 00:39:14 2003
++++ patch-dir\include\you.h	Sat Dec 13 12:45:48 2003
+@@ -69,9 +69,37 @@
+ 	long	polyselfs;	/* transformed yourself */
+ 	long	wishes;		/* used a wish */
+ 	long	wisharti;	/* wished for an artifact */
++	long	armoruses;	/* put on a piece of armor */
++	long	unblinded;	/* starting non-blindfolded and removing a blindfold */
++	long	robbed;		/* killed an artifact-guardian (like an ordinary robber) */
+ 				/* genocides already listed at end of game */
+ };
+ 
++/*             --- roleplay intrinsics --- 
++ *
++ * In a lot of situations it makes sense to make special cases for
++ * conduct-characters. Here's the structure to store a character's
++ * abilities/intentions.
++ *
++ * These are allowed to change during gameplay. So e.g. it's possible
++ * to gain/lose the ability to read.
++ *
++ * It also allows to stop giving special treatment to characters which
++ * obviously abandoned a selected conduct. E.g vegetarians stop feeling
++ * guilty after eating a lot of corpses.
++*/
++struct u_roleplay {		/* Your character is a/an ... */
++	boolean ascet;		/* foodless character */
++	boolean atheist;	/* atheist */
++	boolean blindfolded;	/* blindfolded character */
++	boolean illiterate;	/* illiterate character */
++	boolean pacifist;	/* pacifist */
++	boolean sadist;		/* sadist */
++	boolean nudist;		/* nudist */
++	boolean vegan;		/* vegan */
++	boolean vegetarian;	/* vegetarian */
++};
++
+ /*** Unified structure containing role information ***/
+ struct Role {
+ 	/*** Strings that name various things ***/
+@@ -227,6 +255,50 @@
+ 
+ extern const struct Align aligns[];	/* table of available alignments */
+ 
++/*
++ * The following structure contains information about a conduct
++ *   - a name (e.g. for a conduct-menu at character creation)
++ *   - nouns and adjectives for the highscore
++ *   - a flag for 'worth mentioning in the highscore'
++ *   - all strings necessary for show_conduct()
++ */
++/*** Unified structure specifying conduct information ***/
++struct Conduct {
++	const char *name;		/* pacifism/nudism/...	*/
++	const char *noun;		/* pacifist/nudist/...	*/
++	const char *adj;		/* peaceful/nude/...	*/
++
++	boolean highscore;		/* conduct appears in the highscore */
++
++	const char *prefix;		/* "You "	*/
++	const char *presenttxt;		/* "have been "	*/
++	const char *pasttxt;		/* "were "	*/
++	const char *suffix;		/* "a pacifist"	*/
++	const char *failtxt;		/* "pretended to be a pacifist" */
++
++};
++
++extern const struct Conduct conducts[];/* table of available roleplay conducts*/
++
++/*
++ * The following definitions get used to call violated(CONDUCT_XYZ),
++ * and to access the information contained in the conducts[] array.
++*/
++
++#define ROLE_CONDUCTS		10 	/* number of roleplay conducts */
++
++#define FIRST_CONDUCT		0
++#define CONDUCT_PACIFISM	0
++#define CONDUCT_SADISM		1
++#define CONDUCT_ATHEISM 	2
++#define CONDUCT_NUDISM		3
++#define CONDUCT_BLINDFOLDED	4
++#define CONDUCT_FOODLESS	5
++#define CONDUCT_VEGAN		6
++#define CONDUCT_VEGETARIAN	7
++#define CONDUCT_ILLITERACY	8
++#define CONDUCT_THIEVERY	9
++#define LAST_CONDUCT	ROLE_CONDUCTS - 1
+ 
+ /*** Information about the player ***/
+ struct you {
+@@ -309,6 +381,7 @@
+ 	struct u_event	uevent;		/* certain events have happened */
+ 	struct u_have	uhave;		/* you're carrying special objects */
+ 	struct u_conduct uconduct;	/* KMH, conduct */
++	struct u_roleplay roleplay;	/* roleplay intrinsics */
+ 	struct attribs	acurr,		/* your current attributes (eg. str)*/
+ 			aexe,		/* for gain/loss via "exercise" */
+ 			abon,		/* your bonus attributes (eg. str) */
+diff -Naur orig-dir\src\cmd.c patch-dir\src\cmd.c
+--- orig-dir\src\cmd.c	Mon Dec 08 00:39:14 2003
++++ patch-dir\src\cmd.c	Sat Dec 13 12:34:58 2003
+@@ -1256,22 +1256,38 @@
+ {
+ 	char buf[BUFSZ];
+ 	int ngenocided;
++	int cdt;
+ 
+ 	/* Create the conduct window */
+ 	en_win = create_nhwindow(NHW_MENU);
+ 	putstr(en_win, 0, "Voluntary challenges:");
+ 	putstr(en_win, 0, "");
+ 
+-	if (!u.uconduct.food)
+-	    enl_msg(You_, "have gone", "went", " without food");
+-	    /* But beverages are okay */
+-	else if (!u.uconduct.unvegan)
+-	    you_have_X("followed a strict vegan diet");
+-	else if (!u.uconduct.unvegetarian)
+-	    you_have_been("vegetarian");
++	/* list all major conducts */
+ 
+-	if (!u.uconduct.gnostic)
+-	    you_have_been("an atheist");
++	for(cdt=FIRST_CONDUCT; cdt<=LAST_CONDUCT; cdt++){
++	    if(successful_cdt(cdt)){
++		if (!superfluous_cdt(cdt))
++		    enl_msg(conducts[cdt].prefix, 	/* "You "	*/
++			conducts[cdt].presenttxt,	/* "have been"	*/
++			conducts[cdt].pasttxt,		/* "were"	*/
++			conducts[cdt].suffix);		/* "a pacifist"	*/
++	    } else if(intended_cdt(cdt)){
++		you_have_X(conducts[cdt].failtxt);	/* "pretended to be a pacifist" */
++	    }
++	}
++
++	if (failed_cdt(CONDUCT_PACIFISM) || failed_cdt(CONDUCT_SADISM)){
++	    if (u.uconduct.killer == 0){
++		you_have_never("killed a creature");
++	    } else {
++		Sprintf(buf, "killed %ld creature%s", u.uconduct.killer,
++			plur(u.uconduct.killer));
++		you_have_X(buf);
++	    }
++	}
++
++	/* now list the remaining statistical details */
+ 
+ 	if (!u.uconduct.weaphit)
+ 	    you_have_never("hit with a wielded weapon");
+@@ -1281,16 +1297,15 @@
+ 		    u.uconduct.weaphit, plur(u.uconduct.weaphit));
+ 	    you_have_X(buf);
+ 	}
+-#endif
+-	if (!u.uconduct.killer)
+-	    you_have_been("a pacifist");
+ 
+-	if (!u.uconduct.literate)
+-	    you_have_been("illiterate");
+-#ifdef WIZARD
+-	else if (wizard) {
++	if (wizard && u.uconduct.literate){
+ 	    Sprintf(buf, "read items or engraved %ld time%s",
+ 		    u.uconduct.literate, plur(u.uconduct.literate));
++	    you_have_X(buf);
++	}
++	if (wizard && u.uconduct.armoruses) {
++	    Sprintf(buf, "put on armor %ld time%s",
++		  u.uconduct.armoruses, plur(u.uconduct.armoruses));
+ 	    you_have_X(buf);
+ 	}
+ #endif
+diff -Naur orig-dir\src\do_wear.c patch-dir\src\do_wear.c
+--- orig-dir\src\do_wear.c	Mon Dec 08 00:39:14 2003
++++ patch-dir\src\do_wear.c	Wed Dec 10 13:57:08 2003
+@@ -943,6 +943,7 @@
+ {
+ 	boolean was_blind = Blind, changed = FALSE;
+ 
++	violated(CONDUCT_BLINDFOLDED);
+ 	takeoff_mask &= ~W_TOOL;
+ 	setworn((struct obj *)0, otmp->owornmask);
+ 	off_msg(otmp);
+diff -Naur orig-dir\src\dog.c patch-dir\src\dog.c
+--- orig-dir\src\dog.c	Mon Dec 08 00:39:14 2003
++++ patch-dir\src\dog.c	Wed Dec 10 14:03:12 2003
+@@ -493,7 +493,8 @@
+ 	    mtmp2 = mtmp->nmon;
+ 	    if (DEADMONSTER(mtmp)) continue;
+ 	    if (pets_only && !mtmp->mtame) continue;
+-	    if (((monnear(mtmp, u.ux, u.uy) && levl_follower(mtmp)) ||
++	    if ((((distmin(mtmp->mx, mtmp->my, u.ux, u.uy) <= 2) 
++					&& levl_follower(mtmp)) ||
+ #ifdef STEED
+ 			(mtmp == u.usteed) ||
+ #endif
+diff -Naur orig-dir\src\eat.c patch-dir\src\eat.c
+--- orig-dir\src\eat.c	Mon Dec 08 00:39:14 2003
++++ patch-dir\src\eat.c	Wed Dec 10 14:18:06 2003
+@@ -983,6 +983,8 @@
+ 	return;
+ }
+ 
++/* violated(CONDUCT_VEGETARIAN) replaces violated_vegetarian() */
++#if 0
+ void
+ violated_vegetarian()
+ {
+@@ -993,6 +995,7 @@
+     }
+     return;
+ }
++#endif
+ 
+ /* common code to check and possibly charge for 1 context.tin.tin,
+  * will split() context.tin.tin if necessary */
+@@ -1074,11 +1077,13 @@
+ 			mons[tin.tin->corpsenm].mname);
+ 
+ 	    /* KMH, conduct */
+-	    u.uconduct.food++;
+-	    if (!vegan(&mons[tin.tin->corpsenm]))
+-		u.uconduct.unvegan++;
++	    /* Eating a tin of monstermeat breaks food-conducts here */
+ 	    if (!vegetarian(&mons[tin.tin->corpsenm]))
+-		violated_vegetarian();
++		violated(CONDUCT_VEGETARIAN);
++	    else if (!vegan(&mons[tin.tin->corpsenm]))
++		violated(CONDUCT_VEGAN);
++	    else
++		violated(CONDUCT_FOODLESS);
+ 
+ 	    tin.tin->dknown = tin.tin->known = TRUE;
+ 	    cprefx(tin.tin->corpsenm); cpostfx(tin.tin->corpsenm);
+@@ -1120,7 +1125,8 @@
+ 		      Hallucination ? "Swee'pea" : "Popeye");
+ 	    lesshungry(600);
+ 	    gainstr(tin.tin, 0);
+-	    u.uconduct.food++;
++	    /* Eating a tin of spinache breaks foodless-conduct here */
++	    violated(CONDUCT_FOODLESS);
+ 	}
+ use_me:
+ 	if (carried(tin.tin)) useup(tin.tin);
+@@ -1244,8 +1250,10 @@
+ 				!poly_when_stoned(youmonst.data));
+ 
+ 	/* KMH, conduct */
+-	if (!vegan(&mons[mnum])) u.uconduct.unvegan++;
+-	if (!vegetarian(&mons[mnum])) violated_vegetarian();
++	/* eating a corpse breaks food-conducts here */
++	if (!vegetarian(&mons[mnum])) violated(CONDUCT_VEGETARIAN);
++	else if (!vegan(&mons[mnum])) violated(CONDUCT_VEGAN);
++	else violated(CONDUCT_FOODLESS);
+ 
+ 	if (mnum != PM_LIZARD && mnum != PM_LICHEN) {
+ 		long age = peek_at_iced_corpse_age(otmp);
+@@ -1684,8 +1692,13 @@
+ 		make_blinded((long)u.ucreamed,TRUE);
+ 		break;
+ 	    case FORTUNE_COOKIE:
+-		outrumor(bcsign(otmp), BY_COOKIE);
+-		if (!Blind) u.uconduct.literate++;
++		if (u.roleplay.illiterate) {
++		    pline("This cookie has a scrap of paper inside.");
++		    pline("What a pity that you cannot read!");
++		} else {
++		    outrumor(bcsign(otmp), BY_COOKIE);
++		    if (!Blind) violated(CONDUCT_ILLITERACY);
++		}
+ 		break;
+ 	    case LUMP_OF_ROYAL_JELLY:
+ 		/* This stuff seems to be VERY healthy! */
+@@ -1811,7 +1824,7 @@
+ 		else return 2;
+ 	}
+ 	if (cadaver && !vegetarian(&mons[mnum]) &&
+-	    !u.uconduct.unvegetarian && Role_if(PM_MONK)) {
++	    u.roleplay.vegetarian) {
+ 		Sprintf(buf, "%s unhealthy. %s",
+ 			foodsmell, eat_it_anyway);
+ 		if (yn_function(buf,ynchars,'n')=='n') return 1;
+@@ -1835,7 +1848,7 @@
+ 	 * Breaks conduct, but otherwise safe.
+ 	 */
+ 	 
+-	if (!u.uconduct.unvegan &&
++	if (u.roleplay.vegan &&
+ 	    ((material == LEATHER || material == BONE ||
+ 	      material == DRAGON_HIDE || material == WAX) ||
+ 	     (cadaver && !vegan(&mons[mnum])))) {
+@@ -1844,7 +1857,7 @@
+ 		if (yn_function(buf,ynchars,'n')=='n') return 1;
+ 		else return 2;
+ 	}
+-	if (!u.uconduct.unvegetarian &&
++	if (u.roleplay.vegetarian &&
+ 	    ((material == LEATHER || material == BONE ||
+ 	      material == DRAGON_HIDE) ||
+ 	     (cadaver && !vegetarian(&mons[mnum])))) {
+@@ -1955,14 +1968,16 @@
+ 	    victual.nmod = basenutrit;
+ 	    victual.eating = TRUE; /* needed for lesshungry() */
+ 
++	    /* Eating non-food-objects breaks food-conducts here */
+ 	    material = objects[otmp->otyp].oc_material;
+ 	    if (material == LEATHER ||
+ 		material == BONE || material == DRAGON_HIDE) {
+-		u.uconduct.unvegan++;
+-		violated_vegetarian();
+-	    } else if (material == WAX)
+-		u.uconduct.unvegan++;
+-	    u.uconduct.food++;
++		violated(CONDUCT_VEGETARIAN);
++ 	    } else if (material == WAX) 
++		violated(CONDUCT_VEGAN);
++	    else 
++		violated(CONDUCT_FOODLESS);
++
+ 	    
+ 	    if (otmp->cursed)
+ 		(void) rottenfood(otmp);
+@@ -2004,9 +2019,6 @@
+ 	    return(1);
+ 	}
+ 
+-	/* KMH, conduct */
+-	u.uconduct.food++;
+-
+ 	victual.piece = otmp = touchfood(otmp);
+ 	victual.usedtime = 0;
+ 
+@@ -2030,10 +2042,10 @@
+ 	     * all handled in the != FOOD_CLASS case, above */
+ 	    switch (objects[otmp->otyp].oc_material) {
+ 	    case FLESH:
+-		u.uconduct.unvegan++;
+-		if (otmp->otyp != EGG) {
+-		    violated_vegetarian();
+-		}
++		if (otmp->otyp == EGG)
++		    violated(CONDUCT_VEGAN);
++		else
++		    violated(CONDUCT_VEGETARIAN);
+ 		break;
+ 
+ 	    default:
+@@ -2042,7 +2054,9 @@
+ 		    otmp->otyp == CREAM_PIE ||
+ 		    otmp->otyp == CANDY_BAR || /* milk */
+ 		    otmp->otyp == LUMP_OF_ROYAL_JELLY)
+-		    u.uconduct.unvegan++;
++		    violated(CONDUCT_VEGAN);   
++		else 
++		    violated(CONDUCT_FOODLESS);
+ 		break;
+ 	    }
+ 
+diff -Naur orig-dir\src\end.c patch-dir\src\end.c
+--- orig-dir\src\end.c	Mon Dec 08 00:39:14 2003
++++ patch-dir\src\end.c	Wed Dec 10 14:20:32 2003
+@@ -146,6 +146,7 @@
+ 	}
+ #endif
+ #ifndef LINT
++	killer = 0;
+ 	done(QUIT);
+ #endif
+ 	return 0;
+@@ -566,7 +567,9 @@
+ 	/* Avoid killed by "a" burning or "a" starvation */
+ 	if (!killer && (how == STARVING || how == BURNING))
+ 		killer_format = KILLED_BY;
+-	Strcpy(kilbuf, (!killer || how >= PANICKED ? deaths[how] : killer));
++	/* Ignore some killer-strings, but use them for QUIT and ASCENDED */
++	Strcpy(kilbuf, ((how == PANICKED) || (how == TRICKED) || (how == ESCAPED)
++				|| !killer ? deaths[how] : killer));
+ 	killer = kilbuf;
+ 
+ 	if (how < PANICKED) u.umortality++;
+diff -Naur orig-dir\src\engrave.c patch-dir\src\engrave.c
+--- orig-dir\src\engrave.c	Mon Dec 08 00:39:14 2003
++++ patch-dir\src\engrave.c	Wed Dec 10 14:31:52 2003
+@@ -449,8 +449,10 @@
+ 	char ebuf[BUFSZ];	/* Buffer for initial engraving text */
+ 	char qbuf[QBUFSZ];	/* Buffer for query text */
+ 	char post_engr_text[BUFSZ]; /* Text displayed after engraving prompt */
++	const char *eword;	/* What to engrave */
+ 	const char *everb;	/* Present tense of engraving type */
+-	const char *eloc;	/* Where the engraving is (ie dust/floor/...) */
++	const char *eloc; 	/* Where to engrave in the ground */
++	const char *eground;	/* Type of the ground (ie dust/floor/...) */
+ 	char *sp;		/* Place holder for space count of engr text */
+ 	int len;		/* # of nonspace chars of new engraving text */
+ 	int maxelen;		/* Max allowable length of engraving text */
+@@ -926,51 +928,61 @@
+ 	    }
+ 	}
+ 
+-	eloc = surface(u.ux,u.uy);
++	eword = (u.roleplay.illiterate ? "your name " : "");
++	eground = surface(u.ux,u.uy);
+ 	switch(type){
+ 	    default:
+-		everb = (oep && !eow ? "add to the weird writing on" :
+-				       "write strangely on");
++		everb = (oep && !eow ? "add" : "write");
++		eloc = (oep && !eow ? "to the weird writing on" :
++		    "strangely onto");
+ 		break;
+ 	    case DUST:
+-		everb = (oep && !eow ? "add to the writing in" :
+-				       "write in");
+-		eloc = is_ice(u.ux,u.uy) ? "frost" : "dust";
++		everb = (oep && !eow ? "add" : "write");
++		eloc = (oep && !eow ? "to the writing in" : "into");
++		eground = (is_ice(u.ux,u.uy) ? "frost" : "dust");
+ 		break;
+ 	    case HEADSTONE:
+-		everb = (oep && !eow ? "add to the epitaph on" :
+-				       "engrave on");
++		everb = (oep && !eow ? "add" : "engrave");
++		eloc = (oep && !eow ? "to the epitaph on" : "on");
+ 		break;
+ 	    case ENGRAVE:
+-		everb = (oep && !eow ? "add to the engraving in" :
+-				       "engrave in");
++		everb = (oep && !eow ? "add" : "engrave");
++		eloc = (oep && !eow ? "to the engraving in" : "into");
+ 		break;
+ 	    case BURN:
+-		everb = (oep && !eow ?
+-			( is_ice(u.ux,u.uy) ? "add to the text melted into" :
+-					      "add to the text burned into") :
+-			( is_ice(u.ux,u.uy) ? "melt into" : "burn into"));
++		everb = (oep && !eow ? "add" :
++			( is_ice(u.ux,u.uy) ? "melt" : "burn" ) );
++		eloc = (oep && !eow ? ( is_ice(u.ux,u.uy) ?
++			"to the text melted into" : "to the text burned into" ) :
++			"into");
+ 		break;
+ 	    case MARK:
+-		everb = (oep && !eow ? "add to the graffiti on" :
+-				       "scribble on");
++		everb = (oep && !eow ? "add" : "scribble");
++		eloc = (oep && !eow ? "to the graffiti on" : "onto");
+ 		break;
+ 	    case ENGR_BLOOD:
+-		everb = (oep && !eow ? "add to the scrawl on" :
+-				       "scrawl on");
++		everb = (oep && !eow ? "add" : "scrawl");
++		eloc = (oep && !eow ? "to the scrawl on" : "onto");
+ 		break;
+ 	}
+ 
+ 	/* Tell adventurer what is going on */
+ 	if (otmp != &zeroobj)
+-	    You("%s the %s with %s.", everb, eloc, doname(otmp));
++	    You("%s %swith %s %s the %s.", everb, eword, doname(otmp),
++		eloc, eground);
+ 	else
+-	    You("%s the %s with your %s.", everb, eloc,
+-		makeplural(body_part(FINGER)));
++	    You("%s %swith your %s %s the %s.", everb, eword,
++		makeplural(body_part(FINGER)), eloc, eground);
+ 
+-	/* Prompt for engraving! */
+-	Sprintf(qbuf,"What do you want to %s the %s here?", everb, eloc);
+-	getlin(qbuf, ebuf);
++	/* Prompt for engraving! (if literate) */
++	if(u.roleplay.illiterate) {
++	    Sprintf(ebuf,"X");
++	}
++	else {
++	    Sprintf(qbuf,"What do you want to %s %s the %s here?", everb,
++		eloc, eground);
++	    getlin(qbuf, ebuf);
++	}
+ 
+ 	/* Count the actual # of chars engraved not including spaces */
+ 	len = strlen(ebuf);
+@@ -990,7 +1002,7 @@
+ 
+ 	/* A single `x' is the traditional signature of an illiterate person */
+ 	if (len != 1 || (!index(ebuf, 'x') && !index(ebuf, 'X')))
+-	    u.uconduct.literate++;
++	    violated(CONDUCT_ILLITERACY);
+ 
+ 	/* Mix up engraving if surface or state of mind is unsound.
+ 	   Note: this won't add or remove any spaces. */
+@@ -1072,7 +1084,7 @@
+ 			multi = -(maxelen/10);
+ 		    } else
+ 			if (len > 1) otmp->spe -= len >> 1;
+-			else otmp->spe -= 1; /* Prevent infinite grafitti */
++			else otmp->spe -= 1; /* Prevent infinite graffiti */
+ 		}
+ 		if (multi) nomovemsg = "You finish defacing the dungeon.";
+ 		break;
+diff -Naur orig-dir\src\hack.c patch-dir\src\hack.c
+--- orig-dir\src\hack.c	Mon Dec 08 00:39:14 2003
++++ patch-dir\src\hack.c	Wed Dec 10 14:33:50 2003
+@@ -355,7 +355,7 @@
+     }
+ 
+     /* Okay, you've chewed through something */
+-    u.uconduct.food++;
++    violated(CONDUCT_FOODLESS);
+     u.uhunger += rnd(20);
+ 
+     if (boulder) {
+@@ -1356,7 +1356,7 @@
+ 		    /* you killed your pet by direct action.
+ 		     * minliquid and mintrap don't know to do this
+ 		     */
+-		    u.uconduct.killer++;
++		    violated(CONDUCT_PACIFISM);
+ 		    break;
+ 		default:
+ 		    pline("that's strange, unknown mintrap result!");
+diff -Naur orig-dir\src\mon.c patch-dir\src\mon.c
+--- orig-dir\src\mon.c	Mon Dec 08 00:39:14 2003
++++ patch-dir\src\mon.c	Wed Dec 10 14:36:24 2003
+@@ -1456,6 +1456,10 @@
+ 	tmp = monsndx(mtmp->data);
+ 	if (mvitals[tmp].died < 255) mvitals[tmp].died++;
+ 
++	/* killing an artifact-guardian is ordinary robbery */
++	if (is_guardian(mtmp->data))
++		violated(CONDUCT_THIEVERY);
++
+ 	/* if it's a (possibly polymorphed) quest leader, mark him as dead */
+ 	if (mtmp->m_id == quest_status.leader_m_id)
+ 	    quest_status.leader_is_dead = TRUE;
+@@ -1753,7 +1757,7 @@
+ 
+ 
+ 	/* KMH, conduct */
+-	u.uconduct.killer++;
++	violated(CONDUCT_PACIFISM);
+ 
+ 	if (dest & 1) {
+ 	    const char *verb = nonliving(mtmp->data) ? "destroy" : "kill";
+diff -Naur orig-dir\src\options.c patch-dir\src\options.c
+--- orig-dir\src\options.c	Mon Dec 08 00:39:14 2003
++++ patch-dir\src\options.c	Wed Dec 10 14:37:16 2003
+@@ -137,6 +137,14 @@
+ #else
+ 	{"news", (boolean *)0, FALSE, SET_IN_FILE},
+ #endif
++	{"ascet", &flags.ascet, FALSE, DISP_IN_GAME },
++	{"atheist", &flags.atheist, FALSE, DISP_IN_GAME },
++	{"blindfolded", &flags.blindfolded, FALSE, DISP_IN_GAME },
++	{"illiterate", &flags.illiterate, FALSE, DISP_IN_GAME },
++	{"pacifist", &flags.pacifist, FALSE, DISP_IN_GAME },
++	{"nudist", &flags.nudist, FALSE, DISP_IN_GAME },
++	{"vegan", &flags.vegan, FALSE, DISP_IN_GAME }, 
++	{"vegetarian", &flags.vegetarian, FALSE, DISP_IN_GAME }, 
+ 	{"null", &flags.null, TRUE, SET_IN_GAME},
+ #ifdef MAC
+ 	{"page_wait", &flags.page_wait, TRUE, SET_IN_GAME},
+diff -Naur orig-dir\src\pray.c patch-dir\src\pray.c
+--- orig-dir\src\pray.c	Mon Dec 08 00:39:14 2003
++++ patch-dir\src\pray.c	Sat Dec 13 15:37:24 2003
+@@ -1124,6 +1124,9 @@
+     int pm;
+     aligntyp altaralign = a_align(u.ux,u.uy);
+ 
++    int conduct, cdt;
++    char killerbuf[128];	
++
+     if (!on_altar() || u.uswallow) {
+ 	You("are not standing on an altar.");
+ 	return 0;
+@@ -1293,6 +1296,70 @@
+ verbalize("In return for thy service, I grant thee the gift of Immortality!");
+ 		You("ascend to the status of Demigod%s...",
+ 		    flags.female ? "dess" : "");
++
++	/*
++	 * Check if there's a major successful conduct for the highscore.
++	 * If so, look for additional ones and put everything into the
++	 * killer-string.
++	 *
++	 * In the logfile this looks like:
++	 *	 "ascended adjective adjective ... noun"
++	 *
++	 * In the highscore it looks like:
++	 * 	Patito-Mon-Hum-Mal-Cha the nude vegan pacifist
++	 * 	ascended to demigod-hood. 
++	 */
++
++		conduct = FIRST_CONDUCT;
++
++		while (conduct <= LAST_CONDUCT){
++		    if(successful_cdt(conduct) && conducts[conduct].highscore
++					&& !superfluous_cdt(conduct))
++			 break;
++		    conduct++;
++		}
++		
++		if (conduct <= LAST_CONDUCT) {
++
++		    /* we found a conduct */
++
++		    Sprintf(killerbuf, "ascended ");
++
++		    /*
++		     * continue to search with the next following conduct
++		     * and look for additional highscore conducts
++		     */
++
++		    cdt = conduct + 1;
++
++		    while (cdt <= LAST_CONDUCT){ 
++
++			if (successful_cdt(cdt) && conducts[cdt].highscore
++					&& !superfluous_cdt(cdt)) {
++
++			    /*
++			     * we found an additional conduct; now
++			     * add an adjective to the killer-string,
++			     * and continue the search
++			     */
++
++			    Sprintf(eos(killerbuf),"%s ",conducts[cdt].adj);
++
++			}
++
++			cdt++;
++		    }
++
++			/* now finally add the noun */
++
++		    strcat(killerbuf, conducts[conduct].noun);
++
++		    killer_format = NO_KILLER_PREFIX;
++		    killer = killerbuf;
++
++		} else 		/* No conducts found */
++		    killer = 0;
++
+ 		done(ASCENDED);
+ 	    }
+ 	}
+diff -Naur orig-dir\src\read.c patch-dir\src\read.c
+--- orig-dir\src\read.c	Mon Dec 08 00:39:14 2003
++++ patch-dir\src\read.c	Wed Dec 10 14:45:32 2003
+@@ -50,8 +50,13 @@
+ 	if(scroll->otyp == FORTUNE_COOKIE) {
+ 	    if(flags.verbose)
+ 		You("break up the cookie and throw away the pieces.");
+-	    outrumor(bcsign(scroll), BY_COOKIE);
+-	    if (!Blind) u.uconduct.literate++;
++	    if(u.roleplay.illiterate) {
++		pline("This cookie has a scrap of paper inside.");
++		pline("What a pity that you cannot read!");
++	    } else {
++		outrumor(bcsign(scroll), BY_COOKIE);
++		if (!Blind) violated(CONDUCT_ILLITERACY);
++	    }
+ 	    useup(scroll);
+ 	    return(1);
+ #ifdef TOURIST
+@@ -81,10 +86,15 @@
+ 		You_cant("feel any Braille writing.");
+ 		return 0;
+ 	    }
+-	    u.uconduct.literate++;
+-	    if(flags.verbose)
+-		pline("It reads:");
+-	    Strcpy(buf, shirt_msgs[scroll->o_id % SIZE(shirt_msgs)]);
++	    if (u.roleplay.illiterate) {
++		pline("Unfortunately you cannot read!");
++		return 0;
++	    } else {
++		violated(CONDUCT_ILLITERACY);
++		if(flags.verbose)
++		    pline("It reads:");
++		Strcpy(buf, shirt_msgs[scroll->o_id % SIZE(shirt_msgs)]);
++	    }
+ 	    erosion = greatest_erosion(scroll);
+ 	    if (erosion)
+ 		wipeout_text(buf,
+@@ -97,7 +107,10 @@
+ 		&& scroll->oclass != SPBOOK_CLASS) {
+ 	    pline(silly_thing_to, "read");
+ 	    return(0);
+-	} else if (Blind) {
++	} else if (u.roleplay.illiterate && (scroll->otyp != SPE_BOOK_OF_THE_DEAD)) {
++	    pline("Unfortunately you cannot read.");
++	    return(0);
++	} else if (Blind && (scroll->otyp != SPE_BOOK_OF_THE_DEAD)) {
+ 	    const char *what = 0;
+ 	    if (scroll->oclass == SPBOOK_CLASS)
+ 		what = "mystic runes";
+@@ -113,7 +126,7 @@
+ 	if (scroll->otyp != SPE_BOOK_OF_THE_DEAD &&
+ 		scroll->otyp != SPE_BLANK_PAPER &&
+ 		scroll->otyp != SCR_BLANK_PAPER)
+-	    u.uconduct.literate++;
++	    violated(CONDUCT_ILLITERACY);
+ 
+ 	confused = (Confusion != 0);
+ #ifdef MAIL
+diff -Naur orig-dir\src\role.c patch-dir\src\role.c
+--- orig-dir\src\role.c	Mon Dec 08 00:39:14 2003
++++ patch-dir\src\role.c	Sat Dec 13 15:21:04 2003
+@@ -502,6 +502,51 @@
+ 	{"evil",	"unaligned",	"Una",	0,		A_NONE}
+ };
+ 
++
++/* Table of roleplay-conducts */
++
++const struct Conduct conducts[] = {
++{	"pacifism",	"pacifist", 	"peaceful",	TRUE,
++	"You ","have been ","were ","a pacifist",
++	"pretended to be a pacifist"},
++
++{	"sadism",	"sadist", 	"sadistic",	TRUE,
++	"You ","have been ","were ","a sadist",
++	"pretended to be a sadist"},
++
++{	"atheism", 	"atheist", 	"atheistic",	TRUE,
++	"You ","have been ","were ","an atheist",
++	"pretended to be an atheist"},
++
++{	"nudism", 	"nudist", 	"nude",		TRUE,
++	"You ","have been ","were ","a nudist",
++	"pretended to be a nudist"},
++
++{	"zen",		"zen master", 	"blindfolded",	TRUE,
++	"You ","have followed ","followed ","the true path of zen",
++	"left the true path of zen"},
++
++{	"asceticism",	"ascetic",	"hungry",	TRUE,
++	"You ","have gone ","went ","without food",
++	"pretended to be an ascet"},
++
++{	"vegan",	"vegan",	"vegan",	TRUE,
++	"You ","have followed ","followed ","a strict vegan diet",
++	"pretended to be a vegan"},
++
++{	"vegetarian", 	"vegetarian",	"vegetarian",	TRUE,
++	"You ","have been ","were ","vegetarian",
++	"pretended to be a vegetarian"},
++
++{	"illiteracy", 	"illiterate",	"illiterate",	TRUE,
++	"You ","have been ","were ","illiterate",
++	"have become literate"},
++
++{	"thievery",	"master thief",	"tricky",	TRUE,
++	"You ","have been ","were ","very tricky",
++	"pretended to be a master thief"}
++};
++
+ STATIC_DCL char * FDECL(promptsep, (char *, int));
+ STATIC_DCL int FDECL(role_gendercount, (int));
+ STATIC_DCL int FDECL(race_alignmentcount, (int));
+@@ -1438,6 +1483,12 @@
+ 	    	mons[urole.femalenum].mflags3 |= M3_INFRAVISION;
+ 	}
+ 
++	/* Fix up initial roleplay flags */
++	if (Role_if(PM_MONK)) 
++	    flags.vegetarian = TRUE;
++	flags.vegan |= flags.ascet;
++	flags.vegetarian |= flags.vegan;
++
+ 	/* Artifacts are fixed in hack_artifacts() */
+ 
+ 	/* Success! */
+@@ -1486,6 +1537,160 @@
+ 	default:
+ 	    return ("Goodbye");
+ 	}
++}
++
++/* A function to break a specific roleplay-conduct */
++void
++violated(cdt)
++int cdt;
++{
++	switch(cdt) {		
++	case CONDUCT_PACIFISM:
++	    u.uconduct.killer++;
++	    if (u.roleplay.pacifist) {
++		You_feel("violent!");
++		if (yn("Do you want to quit?") == 'y') {
++		    killer_format = NO_KILLER_PREFIX;
++		    killer = "quit after an act of violence";
++		    done(QUIT);
++		}
++	    if (u.uconduct.killer >= 10) u.roleplay.pacifist = FALSE;
++	    }
++	    break;
++
++	case CONDUCT_NUDISM:
++	    u.uconduct.armoruses++;
++	    if (u.roleplay.nudist){
++		You("realize you were nude.");
++		makemon(&mons[PM_COBRA],u.ux, u.uy, NO_MM_FLAGS);
++		mksobj_at(APPLE, u.ux, u.uy, FALSE, FALSE);
++		u.roleplay.nudist = FALSE;
++	    }
++	    break;
++
++	case CONDUCT_BLINDFOLDED:
++	    u.uconduct.unblinded++;
++	    if (u.roleplay.blindfolded){
++		pline("The spirit of zen leaves your body.");
++		makemon(&mons[PM_ZRUTY], u.ux, u.uy, NO_MM_FLAGS);
++		makemon(&mons[PM_SHOCKING_SPHERE], u.ux, u.uy, NO_MM_FLAGS);
++		makemon(&mons[PM_WOOD_NYMPH],u.ux, u.uy, NO_MM_FLAGS);
++		u.roleplay.blindfolded = FALSE;
++	    }
++	    break;
++
++	case CONDUCT_VEGETARIAN:	/* replaces violated_vegetarian() */
++	    if (u.roleplay.vegetarian)
++		You_feel("guilty.");
++	    if (Role_if(PM_MONK))
++		adjalign(-1);
++	    u.uconduct.unvegetarian++;
++	    u.uconduct.unvegan++;
++	    u.uconduct.food++;
++	    if (u.uconduct.unvegetarian >= 30) u.roleplay.vegetarian = FALSE;
++	    if (u.uconduct.unvegan >= 20) u.roleplay.vegan = FALSE;
++	    if (u.uconduct.food >= 10) u.roleplay.ascet = FALSE;
++	    break;
++
++	case CONDUCT_VEGAN:
++	    if (u.roleplay.vegan)
++		You_feel("a bit guilty.");
++	    u.uconduct.unvegan++;
++	    u.uconduct.food++;
++	    if (u.uconduct.unvegan >= 20) u.roleplay.vegan = FALSE;
++	    if (u.uconduct.food >= 10) u.roleplay.ascet = FALSE;
++	    break;
++
++	case CONDUCT_FOODLESS:
++	    if (u.roleplay.ascet)
++		You_feel("a little bit guilty.");
++	    u.uconduct.food++;
++	    if (u.uconduct.food >= 10) u.roleplay.ascet = FALSE;
++	    break;
++
++	case CONDUCT_ILLITERACY:
++	    u.uconduct.literate++;
++	    if (u.roleplay.illiterate) {
++		/* should be impossible */
++		pline("Literatally literature for literate illiterates!");
++		exercise(A_WIS, TRUE);		
++		}
++	    break;
++
++	case CONDUCT_THIEVERY:
++	    u.uconduct.robbed++;
++	    if (Role_if(PM_ROGUE))
++		You_feel("like an ordinary robber."); 
++	    break;
++
++	default: 
++	    impossible("violated: unknown conduct");
++
++	}
++	return;
++}
++
++/* a function to check whether a specific conduct has been broken
++ * return FALSE if broken
++*/
++boolean
++successful_cdt(cdt)
++int cdt;
++{
++	if ((cdt == CONDUCT_PACIFISM) && !u.uconduct.killer &&
++			!num_genocides() && (u.uconduct.weaphit<=100)) 
++	    return TRUE;
++	if ((cdt == CONDUCT_SADISM) && !u.uconduct.killer &&
++		 	(num_genocides() || (u.uconduct.weaphit>100)))
++	    return TRUE;
++	if ((cdt == CONDUCT_ATHEISM) && !u.uconduct.gnostic) return TRUE;
++	if ((cdt == CONDUCT_NUDISM) && !u.uconduct.armoruses) return TRUE;
++	if ((cdt == CONDUCT_BLINDFOLDED) && !u.uconduct.unblinded) return TRUE;
++	if ((cdt == CONDUCT_VEGETARIAN) && !u.uconduct.unvegetarian) return TRUE;
++	if ((cdt == CONDUCT_VEGAN) && !u.uconduct.unvegan) return TRUE;
++	if ((cdt == CONDUCT_FOODLESS) && !u.uconduct.food) return TRUE;
++	if ((cdt == CONDUCT_ILLITERACY) && !u.uconduct.literate) return TRUE;
++	if ((cdt == CONDUCT_THIEVERY) && !u.uconduct.robbed) return TRUE;
++
++	return FALSE;
++}
++
++/* a function to check whether a specific conduct *
++ *  was selected at character creation		  */
++boolean
++intended_cdt(cdt)
++int cdt;
++{
++	if ((cdt == CONDUCT_PACIFISM) && flags.pacifist) return TRUE;
++	if ((cdt == CONDUCT_ATHEISM) && flags.atheist) return TRUE;
++	if ((cdt == CONDUCT_NUDISM) && flags.nudist) return TRUE;
++	if ((cdt == CONDUCT_BLINDFOLDED) && flags.blindfolded) return TRUE;
++	if ((cdt == CONDUCT_FOODLESS) && flags.ascet) return TRUE;
++	if ((cdt == CONDUCT_VEGAN) && flags.vegan) return TRUE;
++	if ((cdt == CONDUCT_VEGETARIAN) && flags.vegetarian) return TRUE;
++	if ((cdt == CONDUCT_ILLITERACY) && flags.illiterate) return TRUE;
++
++	return FALSE;
++}
++
++/* a function to check whether it's superflous to list that conduct */ 
++boolean
++superfluous_cdt(cdt)
++int cdt;
++{
++	if ((cdt == CONDUCT_VEGAN) && successful_cdt(CONDUCT_FOODLESS)) return TRUE;
++	if ((cdt == CONDUCT_VEGETARIAN) && successful_cdt(CONDUCT_VEGAN)) return TRUE;
++	if ((cdt == CONDUCT_THIEVERY) && !u.uevent.invoked) return TRUE;
++
++	return FALSE;
++}
++
++/* tell if you failed a selected conduct */ 
++boolean
++failed_cdt(cdt)
++int cdt;
++{
++	return (intended_cdt(cdt) && !successful_cdt(cdt));
+ }
+ 
+ /* role.c */
+diff -Naur orig-dir\src\topten.c patch-dir\src\topten.c
+--- orig-dir\src\topten.c	Mon Dec 08 00:39:14 2003
++++ patch-dir\src\topten.c	Wed Dec 10 14:52:14 2003
+@@ -587,6 +587,12 @@
+ 	    if ((bp = index(linebuf, ')')) != 0)
+ 		*bp = (t1->deathdnum == astral_level.dnum) ? '\0' : ' ';
+ 	    second_line = FALSE;
++	} else if (!strncmp("ascended ", t1->death, 9)) {
++	    Strcat(linebuf, "the ");
++	    Strcat(linebuf, t1->death + 9);
++	    Sprintf(eos(linebuf), " ascended to demigod%s-hood",
++		    (t1->plgend[0] == 'F') ? "dess" : "");
++	    second_line = FALSE;
+ 	} else if (!strncmp("ascended", t1->death, 8)) {
+ 	    Sprintf(eos(linebuf), "ascended to demigod%s-hood",
+ 		    (t1->plgend[0] == 'F') ? "dess" : "");
+@@ -637,6 +643,7 @@
+ 	    }
+ 
+ 	    /* kludge for "quit while already on Charon's boat" */
++	    /* and "quit after breaking pacifism conduct"	*/
+ 	    if (!strncmp(t1->death, "quit ", 5))
+ 		Strcat(linebuf, t1->death + 4);
+ 	}
+diff -Naur orig-dir\src\u_init.c patch-dir\src\u_init.c
+--- orig-dir\src\u_init.c	Mon Dec 08 00:39:14 2003
++++ patch-dir\src\u_init.c	Wed Dec 10 15:27:52 2003
+@@ -576,6 +576,23 @@
+ 	adjabil(0,1);
+ 	u.ulevel = u.ulevelmax = 1;
+ 
++	/*
++	 * u.roleplay should be treated similar to gender and alignment
++	 *   - it gets set at character creation
++	 *   - it's hard to change in-game
++	 *     (e.g. a special NPC could teach literacy somewhere)
++	 * the initialisation has to be in front of food, alignment
++	 * and inventory.
++	 */
++	u.roleplay.ascet	= flags.ascet;
++	u.roleplay.atheist	= flags.atheist;
++	u.roleplay.blindfolded	= flags.blindfolded;
++	u.roleplay.illiterate	= flags.illiterate;
++	u.roleplay.pacifist	= flags.pacifist;
++	u.roleplay.nudist	= flags.nudist;
++	u.roleplay.vegan	= flags.vegan;
++	u.roleplay.vegetarian	= flags.vegetarian;
++
+ 	init_uhunger();
+ 	for (i = 0; i <= MAXSPELL; i++) spl_book[i].sp_id = NO_SPELL;
+ 	u.ublesscnt = 300;			/* no prayers just yet */
+@@ -806,6 +823,16 @@
+ 		break;
+ 	}
+ 
++	/*** Conduct specific initialisation ***/
++
++	if (u.roleplay.blindfolded) {
++		if(!ublindf) ini_inv(Blindfold);
++	} else {
++		violated(CONDUCT_BLINDFOLDED);
++	}
++	if (u.roleplay.atheist) 
++		u.ugangr++;
++
+ 	if (discover)
+ 		ini_inv(Wishing);
+ 
+@@ -1015,7 +1042,7 @@
+ 		if (otyp == OIL_LAMP)
+ 			discover_object(POT_OIL, TRUE, FALSE);
+ 
+-		if(obj->oclass == ARMOR_CLASS){
++		if((obj->oclass == ARMOR_CLASS && !u.roleplay.nudist)){
+ 			if (is_shield(obj) && !uarms) {
+ 				setworn(obj, W_ARMS);
+ 				if (uswapwep) setuswapwep((struct obj *) 0);
+@@ -1039,12 +1066,15 @@
+ 			otyp == TIN_OPENER || otyp == FLINT || otyp == ROCK) {
+ 		    if (is_ammo(obj) || is_missile(obj)) {
+ 			if (!uquiver) setuqwep(obj);
+-		    } else if (!uwep) setuwep(obj);
++		    } else if ((!uwep) && !u.roleplay.pacifist) setuwep(obj);
+ 		    else if (!uswapwep) setuswapwep(obj);
+ 		}
+ 		if (obj->oclass == SPBOOK_CLASS &&
+ 				obj->otyp != SPE_BLANK_PAPER)
+ 		    initialspell(obj);
++
++		if ((obj->otyp == BLINDFOLD) && u.roleplay.blindfolded)
++				setworn(obj, W_TOOL);
+ 
+ #if !defined(PYRAMID_BUG) && !defined(MAC)
+ 		if(--trop->trquan) continue;	/* make a similar object */
+diff -Naur orig-dir\src\uhitm.c patch-dir\src\uhitm.c
+--- orig-dir\src\uhitm.c	Mon Dec 08 00:39:14 2003
++++ patch-dir\src\uhitm.c	Wed Dec 10 15:00:00 2003
+@@ -1535,16 +1535,18 @@
+ 		}
+ 
+ 		You("eat %s brain!", s_suffix(mon_nam(mdef)));
+-		u.uconduct.food++;
+ 		if (touch_petrifies(mdef->data) && !Stone_resistance && !Stoned) {
+ 		    Stoned = 5;
+ 		    killer_format = KILLED_BY_AN;
+ 		    delayed_killer = mdef->data->mname;
+ 		}
+-		if (!vegan(mdef->data))
+-		    u.uconduct.unvegan++;
+ 		if (!vegetarian(mdef->data))
+-		    violated_vegetarian();
++		    violated(CONDUCT_VEGETARIAN);
++		else if (!vegan(mdef->data))
++		    violated(CONDUCT_VEGAN);
++		else
++		    violated(CONDUCT_FOODLESS);
++
+ 		if (mindless(mdef->data)) {
+ 		    pline("%s doesn't notice.", Monnam(mdef));
+ 		    break;
+@@ -1781,11 +1783,12 @@
+ 			}
+ 
+ 			/* KMH, conduct */
+-			u.uconduct.food++;
+-			if (!vegan(mdef->data))
+-			     u.uconduct.unvegan++;
+ 			if (!vegetarian(mdef->data))
+-			     violated_vegetarian();
++			    violated(CONDUCT_VEGETARIAN);
++			else if (!vegan(mdef->data))
++			    violated(CONDUCT_VEGAN);
++			else
++			    violated(CONDUCT_FOODLESS);
+ 
+ 			/* Use up amulet of life saving */
+ 			if (!!(otmp = mlifesaver(mdef))) m_useup(mdef, otmp);
+diff -Naur orig-dir\src\worn.c patch-dir\src\worn.c
+--- orig-dir\src\worn.c	Mon Dec 08 00:39:14 2003
++++ patch-dir\src\worn.c	Wed Dec 10 15:01:48 2003
+@@ -57,6 +57,12 @@
+ 	    uskin = obj;
+ 	 /* assert( !uarm ); */
+ 	} else {
++	    if (obj && (mask & W_ARMOR)) {	
++		violated(CONDUCT_NUDISM);			
++		/* Restoring a game and naming worn armor uses setworn.  *
++		 * This can unneccessariely increase the conduct-counter *
++		 * (only visible in Wizmode)				 */
++	    }
+ 	    for(wp = worn; wp->w_mask; wp++) if(wp->w_mask & mask) {
+ 		oobj = *(wp->w_obj);
+ 		if(oobj && !(oobj->owornmask & wp->w_mask))
+diff -Naur orig-dir\src\write.c patch-dir\src\write.c
+--- orig-dir\src\write.c	Mon Dec 08 00:39:14 2003
++++ patch-dir\src\write.c	Wed Dec 10 15:03:08 2003
+@@ -80,7 +80,10 @@
+ 	boolean by_descr = FALSE;
+ 	const char *typeword;
+ 
+-	if (nohands(youmonst.data)) {
++	if (u.roleplay.illiterate) {
++	    You("don't know how to write!");
++	    return 0;
++	} else if (nohands(youmonst.data)) {
+ 	    You("need hands to be able to write!");
+ 	    return 0;
+ 	} else if (Glib) {
+@@ -156,7 +159,7 @@
+ 	}
+ 
+ 	/* KMH, conduct */
+-	u.uconduct.literate++;
++	violated(CONDUCT_ILLITERACY);
+ 
+ 	new_obj = mksobj(i, FALSE, FALSE);
+ 	new_obj->bknown = (paper->bknown && pen->bknown);
