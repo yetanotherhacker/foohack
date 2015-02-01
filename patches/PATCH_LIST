@@ -1,4 +1,4 @@
-@Beartraps patch by Malcolm Ryna
+#Beartraps patch by Malcolm Ryna
 #http://bilious.alt.org/?143
 beartraps.diff
 
@@ -29,3 +29,7 @@ qm_erinys_names.diff
 #Seppuku patch by Sebastian Haas
 #http://bilious.alt.org/?222
 nethack-3.4.3-seppuku.patch
+
+#Thrown Weapons patch by Roderick Schertler
+#http://bilious.alt.org/?98
+nethack-3.4.1-pickup_thrown.1.diff
