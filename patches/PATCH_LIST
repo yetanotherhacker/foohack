@@ -26,6 +26,10 @@ nh343-grudge.diff
 #http://bilious.alt.org/?181
 qm_erinys_names.diff
 
+#Quiver Fired Ammunitions patch by Jukka Lahtinen
+#http://bilious.alt.org/?287
+quivfir-343.diff
+
 #Seppuku patch by Sebastian Haas
 #http://bilious.alt.org/?222
 nethack-3.4.3-seppuku.patch
